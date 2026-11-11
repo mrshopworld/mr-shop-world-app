@@ -55,12 +55,21 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 _isLoading = false;
               });
             }
+            // ওয়েবসাইটের target="_blank" লিংকগুলো যেন বর্তমান পেজেই ট্রিগার হয়
+            _controller.runJavaScript('''
+              document.querySelectorAll('a[target="_blank"]').forEach(function(a) {
+                a.removeAttribute('target');
+              });
+            ''');
           },
           onNavigationRequest: (NavigationRequest request) async {
             final uri = Uri.parse(request.url);
+            // mrshopworld.com ছাড়া অন্য যেকোনো লিংক (Amazon, AliExpress, Daraz ইত্যাদি) সরাসরি ফোনের ব্রাউজার বা অ্যাপে ওপেন হবে
             if (!uri.host.contains('mrshopworld.com')) {
-              if (await canLaunchUrl(uri)) {
+              try {
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (e) {
+                debugPrint('Could not launch $uri: $e');
               }
               return NavigationDecision.prevent;
             }
