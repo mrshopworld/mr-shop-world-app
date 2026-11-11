@@ -17,13 +17,15 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.0'
-      - name: Create Clean Project & Copy Code
+      - name: Create Clean Project & Fix Kotlin
         run: |
           mkdir temp_app
           cd temp_app
           flutter create . --project-name mr_shop_world --org com.mrshopworld.app
           cp ../pubspec.yaml pubspec.yaml
           cp ../lib/main.dart lib/main.dart
+          sed -i 's/id "org.jetbrains.kotlin.android" version "1.7.10"/id "org.jetbrains.kotlin.android" version "1.9.24"/g' android/settings.gradle
+          sed -i 's/id "org.jetbrains.kotlin.android" version "1.8.22"/id "org.jetbrains.kotlin.android" version "1.9.24"/g' android/settings.gradle
           sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application/g' android/app/src/main/AndroidManifest.xml
           flutter pub get
           flutter build apk --release
