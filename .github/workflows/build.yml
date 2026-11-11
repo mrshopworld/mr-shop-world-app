@@ -17,9 +17,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.0'
-      - name: Setup Flutter & Permissions
+      - name: Backup Custom Files & Init Flutter
         run: |
+          cp pubspec.yaml pubspec_backup.yaml
+          cp lib/main.dart main_backup.dart
           flutter create . --project-name mr_shop_world --org com.mrshopworld.app --overwrite
+          mv pubspec_backup.yaml pubspec.yaml
+          mv main_backup.dart lib/main.dart
           sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application/g' android/app/src/main/AndroidManifest.xml
       - name: Get Dependencies & Build APK
         run: |
