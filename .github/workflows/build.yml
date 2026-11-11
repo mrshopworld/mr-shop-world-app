@@ -16,10 +16,11 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.19.0'
-      - name: Initialize Flutter Project Files
+          flutter-version: '3.24.0'
+      - name: Setup Flutter & Permissions
         run: |
-          flutter create . --project-name mr_shop_world --org com.mrshopworld.app
+          flutter create . --project-name mr_shop_world --org com.mrshopworld.app --overwrite
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application/g' android/app/src/main/AndroidManifest.xml
       - name: Get Dependencies & Build APK
         run: |
           flutter pub get
