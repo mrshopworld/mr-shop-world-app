@@ -58,17 +58,9 @@ jobs:
             echo "storeFile=upload-keystore.jks" >> key.properties
           fi
 
-          # Update build.gradle to use release signing
-          cat << 'EOF' > signing_patch.txt
-          import java.util.Properties
-          import java.io.FileInputStream
-          def keystoreProperties = new Properties()
-          def keystorePropertiesFile = rootProject.file('key.properties')
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-          EOF
-          cat signing_patch.txt app/build.gradle > app/build.gradle.tmp && mv app/build.gradle.tmp app/build.gradle
+          # Insert keystoreProperties right before android { block (after plugins block)
+          sed -i '/^android {/i def keystoreProperties = new Properties()\ndef keystorePropertiesFile = rootProject.file("key.properties")\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n}\n' app/build.gradle
+
           sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/g' app/build.gradle
           sed -i '/signingConfigs {/a \        release {\n            keyAlias keystoreProperties["keyAlias"]\n            keyPassword keystoreProperties["keyPassword"]\n            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n            storePassword keystoreProperties["storePassword"]\n        }' app/build.gradle
 
