@@ -1,4 +1,4 @@
-name: Build MR Shop World APK
+name: Build Play Store & App Store Release
 
 on:
   push:
@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build_android:
+    name: Build Signed Android AAB & APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,21 +18,105 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.0'
-      - name: Create Clean Project & Fix Permissions
+
+      - name: Setup Project, Logo & Permissions
         run: |
           mkdir temp_app
           cd temp_app
           flutter create . --project-name mr_shop_world --org com.mrshopworld.app
           cp ../pubspec.yaml pubspec.yaml
           cp ../lib/main.dart lib/main.dart
+          cp ../logo.jpg logo.jpg
+
+          # Kotlin & Gradle compatibility fix
           sed -i 's/id "org.jetbrains.kotlin.android" version "1.7.10"/id "org.jetbrains.kotlin.android" version "1.9.24"/g' android/settings.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version "1.8.22"/id "org.jetbrains.kotlin.android" version "1.9.24"/g' android/settings.gradle
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <queries><intent><action android:name="android.intent.action.VIEW" \/><data android:scheme="https" \/><\/intent><intent><action android:name="android.intent.action.VIEW" \/><data android:scheme="http" \/><\/intent><\/queries>\n    <application/g' android/app/src/main/AndroidManifest.xml
+
+          # App Name & Internet Permissions
+          sed -i 's/android:label="mr_shop_world"/android:label="MR Shop World"/g' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"\/>\n    <queries><intent><action android:name="android.intent.action.VIEW" \/><data android:scheme="https" \/><\/intent><intent><action android:name="android.intent.action.VIEW" \/><data android:scheme="http" \/><\/intent><\/queries>\n    <application/g' android/app/src/main/AndroidManifest.xml
+
+      - name: Configure Automatic Keystore Signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          cd temp_app/android
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > app/upload-keystore.jks
+            echo "storePassword=$STORE_PASSWORD" > key.properties
+            echo "keyPassword=$KEY_PASSWORD" >> key.properties
+            echo "keyAlias=$KEY_ALIAS" >> key.properties
+            echo "storeFile=upload-keystore.jks" >> key.properties
+          else
+            keytool -genkey -v -keystore app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias mrshopworld -storepass mrshop123456 -keypass mrshop123456 -dname "CN=MR Shop World, OU=IT, O=MR Shop World, L=Dhaka, S=Dhaka, C=BD"
+            echo "storePassword=mrshop123456" > key.properties
+            echo "keyPassword=mrshop123456" >> key.properties
+            echo "keyAlias=mrshopworld" >> key.properties
+            echo "storeFile=upload-keystore.jks" >> key.properties
+          fi
+
+          # Update build.gradle to use release signing
+          cat << 'EOF' > signing_patch.txt
+          import java.util.Properties
+          import java.io.FileInputStream
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+          EOF
+          cat signing_patch.txt app/build.gradle > app/build.gradle.tmp && mv app/build.gradle.tmp app/build.gradle
+          sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/g' app/build.gradle
+          sed -i '/signingConfigs {/a \        release {\n            keyAlias keystoreProperties["keyAlias"]\n            keyPassword keystoreProperties["keyPassword"]\n            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n            storePassword keystoreProperties["storePassword"]\n        }' app/build.gradle
+
+      - name: Generate Icons & Build Play Store AAB + APK
+        run: |
+          cd temp_app
           flutter pub get
+          dart run flutter_launcher_icons
           flutter build apk --release
-      - name: Upload APK
+          flutter build appbundle --release
+
+      - name: Upload Play Store AAB, APK & Keystore Backup
         uses: actions/upload-artifact@v4
         with:
-          name: MR-Shop-World-App
-          path: temp_app/build/app/outputs/flutter-apk/app-release.apk
+          name: MR-Shop-World-PlayStore-Release
+          path: |
+            temp_app/build/app/outputs/bundle/release/app-release.aab
+            temp_app/build/app/outputs/flutter-apk/app-release.apk
+            temp_app/android/app/upload-keystore.jks
+
+  build_ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+      - name: Setup iOS Project & Logo
+        run: |
+          mkdir temp_app
+          cd temp_app
+          flutter create . --project-name mr_shop_world --org com.mrshopworld.app
+          cp ../pubspec.yaml pubspec.yaml
+          cp ../lib/main.dart lib/main.dart
+          cp ../logo.jpg logo.jpg
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName MR Shop World" ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName MR Shop World" ios/Runner/Info.plist
+          flutter pub get
+          dart run flutter_launcher_icons
+          flutter build ios --release --no-codesign
+          mkdir -p Payload
+          mv build/ios/iphoneos/Runner.app Payload/
+          zip -r -y MR-Shop-World-iOS.ipa Payload
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MR-Shop-World-iOS
+          path: temp_app/MR-Shop-World-iOS.ipa
           
