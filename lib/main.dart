@@ -15,7 +15,7 @@ class MRShopWorldApp extends StatelessWidget {
       title: 'MR Shop World',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0D47A1)),
         useMaterial3: true,
       ),
       home: const WebViewScreen(),
@@ -33,51 +33,72 @@ class WebViewScreen extends StatefulWidget {
 class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
-  final String _homeUrl = 'https://mrshopworld.com';
+  bool _isOffline = false;
+  double _loadingProgress = 0.0;
+
+  final String _initialUrl = 'https://mrshopworld.com';
 
   @override
   void initState() {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.white)
       ..setNavigationDelegate(
         NavigationDelegate(
+          onProgress: (int progress) {
+            setState(() {
+              _loadingProgress = progress / 100.0;
+            });
+          },
           onPageStarted: (String url) {
-            if (mounted) {
-              setState(() {
-                _isLoading = true;
-              });
-            }
+            setState(() {
+              _isLoading = true;
+              _isOffline = false;
+            });
           },
           onPageFinished: (String url) {
-            if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+          },
+          onWebResourceError: (WebResourceError error) {
+            if (error.isForMainFrame == true) {
               setState(() {
+                _isOffline = true;
                 _isLoading = false;
               });
             }
-            // ওয়েবসাইটের target="_blank" লিংকগুলো যেন বর্তমান পেজেই ট্রিগার হয়
-            _controller.runJavaScript('''
-              document.querySelectorAll('a[target="_blank"]').forEach(function(a) {
-                a.removeAttribute('target');
-              });
-            ''');
           },
           onNavigationRequest: (NavigationRequest request) async {
             final uri = Uri.parse(request.url);
-            // mrshopworld.com ছাড়া অন্য যেকোনো লিংক (Amazon, AliExpress, Daraz ইত্যাদি) সরাসরি ফোনের ব্রাউজার বা অ্যাপে ওপেন হবে
-            if (!uri.host.contains('mrshopworld.com')) {
-              try {
+            if (!request.url.contains('mrshopworld.com')) {
+              if (await canLaunchUrl(uri)) {
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
-              } catch (e) {
-                debugPrint('Could not launch $uri: $e');
+                return NavigationDecision.prevent;
               }
-              return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;
           },
         ),
       )
-      ..loadRequest(Uri.parse(_homeUrl));
+      ..loadRequest(Uri.parse(_initialUrl));
+  }
+
+  Future<bool> _handleBackButton() async {
+    if (await _controller.canGoBack()) {
+      _controller.goBack();
+      return false;
+    }
+    return true;
+  }
+
+  void _reloadPage() {
+    setState(() {
+      _isOffline = false;
+      _isLoading = true;
+    });
+    _controller.reload();
   }
 
   @override
@@ -86,52 +107,90 @@ class _WebViewScreenState extends State<WebViewScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        if (await _controller.canGoBack()) {
-          await _controller.goBack();
+        final shouldPop = await _handleBackButton();
+        if (shouldPop && context.mounted) {
+          Navigator.of(context).pop();
         }
       },
       child: Scaffold(
         body: SafeArea(
           child: Stack(
             children: [
-              WebViewWidget(controller: _controller),
-              if (_isLoading)
-                const Center(
-                  child: CircularProgressIndicator(),
+              if (!_isOffline) WebViewWidget(controller: _controller),
+              if (_isOffline) _buildOfflineScreen(),
+              if (_isLoading && !_isOffline)
+                LinearProgressIndicator(
+                  value: _loadingProgress,
+                  minHeight: 3,
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
                 ),
             ],
           ),
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          selectedItemColor: Colors.blue,
-          unselectedItemColor: Colors.grey,
-          onTap: (index) async {
-            if (index == 0) {
-              _controller.loadRequest(Uri.parse(_homeUrl));
-            } else if (index == 1) {
-              if (await _controller.canGoBack()) {
-                _controller.goBack();
-              }
-            } else if (index == 2) {
-              _controller.reload();
-            }
-          },
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home),
-              label: 'Home',
+      ),
+    );
+  }
+
+  Widget _buildOfflineScreen() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24.0),
+      color: Colors.white,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Image.asset(
+              'logo.jpg',
+              width: 110,
+              height: 110,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.wifi_off_rounded,
+                size: 80,
+                color: Colors.grey,
+              ),
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.arrow_back),
-              label: 'Back',
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'ইন্টারনেট সংযোগ নেই!',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.refresh),
-              label: 'Refresh',
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'MR Shop World ব্রাউজ করতে আপনার মোবাইলের ডাটা বা ওয়াই-ফাই সংযোগ চালু করুন।',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 15,
+              color: Colors.black54,
+              height: 1.5,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            onPressed: _reloadPage,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text(
+              'পুনরায় চেষ্টা করুন',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+              backgroundColor: const Color(0xFF0D47A1),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
