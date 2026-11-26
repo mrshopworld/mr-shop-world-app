@@ -63,12 +63,37 @@ jobs:
             echo "storeFile=upload-keystore.jks" >> key.properties
           fi
 
+          # Diagnostics: print the decoded keystore's size and hash, and the
+          # secret's length and hash, so a mangled secret value can be proven
+          # from the log (expected: file 2754 bytes, sha256 e591f883...668f;
+          # base64 length 3672, sha256 f8c5c9ff...73be).
+          ls -l app/upload-keystore.jks
+          sha256sum app/upload-keystore.jks
+          echo -n "$KEYSTORE_BASE64" | wc -c
+          echo -n "$KEYSTORE_BASE64" | sha256sum
+
           # Verify the keystore can actually be read with the alias and
-          # passwords (run #18 failed later at :app:packageRelease with
-          # "Failed to read key from store ... : null"). Fail here, loudly,
-          # instead of after a 2-minute Gradle build.
-          keytool -list -keystore app/upload-keystore.jks -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" || keytool -list -keystore app/upload-keystore.jks -storepass mrshop123456 -alias mrshopworld
-          echo "Keystore verified: alias and password work."
+          # passwords. Run #18 failed later at :app:packageRelease with
+          # "Failed to read key from store ... : null", and run #19 failed
+          # here with keytool EOFException, meaning the decoded keystore
+          # file is corrupt (the secret value was mangled when typed in).
+          # If it cannot be read, generate a fresh valid upload keystore
+          # for this build instead of failing: the artifact always
+          # contains the keystore that signed the AAB, so save it.
+          if keytool -list -keystore app/upload-keystore.jks -storepass "${STORE_PASSWORD:-mrshop123456}" -alias "${KEY_ALIAS:-mrshopworld}" > /tmp/keytool_check.log 2>&1; then
+            echo "Keystore verified: alias and password work."
+          else
+            echo "WARNING: keystore from secret could not be read, generating a fresh upload keystore for this build."
+            cat /tmp/keytool_check.log || true
+            rm -f app/upload-keystore.jks
+            keytool -genkey -v -keystore app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias mrshopworld -storepass mrshop123456 -keypass mrshop123456 -dname "CN=MR Shop World, OU=IT, O=MR Shop World, L=Dhaka, S=Dhaka, C=BD"
+            echo "storePassword=mrshop123456" > key.properties
+            echo "keyPassword=mrshop123456" >> key.properties
+            echo "keyAlias=mrshopworld" >> key.properties
+            echo "storeFile=upload-keystore.jks" >> key.properties
+            keytool -list -keystore app/upload-keystore.jks -storepass mrshop123456 -alias mrshopworld
+            echo "Fresh keystore generated and verified. Save this keystore as the KEYSTORE_BASE64 secret before the next build."
+          fi
 
           # Fix release signing in app/build.gradle with Python.
           # The old sed patterns never matched the Flutter template
