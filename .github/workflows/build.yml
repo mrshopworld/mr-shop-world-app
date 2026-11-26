@@ -28,9 +28,14 @@ jobs:
           cp ../lib/main.dart lib/main.dart
           cp ../logo.jpg logo.jpg
 
-          # Kotlin & Gradle compatibility fix
-          sed -i 's/id "org.jetbrains.kotlin.android" version "1.7.10"/id "org.jetbrains.kotlin.android" version "1.9.24"/g' android/settings.gradle
-          sed -i 's/id "org.jetbrains.kotlin.android" version "1.8.22"/id "org.jetbrains.kotlin.android" version "1.9.24"/g' android/settings.gradle
+          # Kotlin compatibility fix: set the Kotlin plugin to 1.9.24 no matter
+          # which version the Flutter template ships (old fixed-version seds
+          # silently missed newer templates and the build failed on Kotlin
+          # metadata version errors). Fail loudly if the version is not set.
+          sed -i -E 's/(id "org.jetbrains.kotlin.android" version ")[^"]+(")/\11.9.24\2/g' android/settings.gradle
+          sed -i -E "s/(ext.kotlin_version *= *')[^']+(')/\11.9.24\2/g; s/(ext.kotlin_version *= *\")[^\"]+(\")/\11.9.24\2/g" android/build.gradle
+          grep -n "org.jetbrains.kotlin.android" android/settings.gradle || (echo "ERROR: Kotlin plugin line not found in settings.gradle" && exit 1)
+          flutter --version
 
           # App Name & Internet Permissions
           sed -i 's/android:label="mr_shop_world"/android:label="MR Shop World"/g' android/app/src/main/AndroidManifest.xml
@@ -58,6 +63,13 @@ jobs:
             echo "storeFile=upload-keystore.jks" >> key.properties
           fi
 
+          # Verify the keystore can actually be read with the alias and
+          # passwords (run #18 failed later at :app:packageRelease with
+          # "Failed to read key from store ... : null"). Fail here, loudly,
+          # instead of after a 2-minute Gradle build.
+          keytool -list -keystore app/upload-keystore.jks -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" || keytool -list -keystore app/upload-keystore.jks -storepass mrshop123456 -alias mrshopworld
+          echo "Keystore verified: alias and password work."
+
           # Fix release signing in app/build.gradle with Python.
           # The old sed patterns never matched the Flutter template
           # (it uses "signingConfig = signingConfigs.debug" and has no
@@ -80,6 +92,7 @@ jobs:
                      '            keyPassword keystoreProperties["keyPassword"]\n'
                      '            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n'
                      '            storePassword keystoreProperties["storePassword"]\n'
+                     '            storeType "PKCS12"\n'
                      '        }\n'
                      '    }\n\n')
           if 'signingConfigs {' not in s:
