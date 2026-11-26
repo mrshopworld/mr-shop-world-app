@@ -143,8 +143,17 @@ jobs:
       - name: Verify AAB is release-signed
         run: |
           cd temp_app
-          unzip -p build/app/outputs/bundle/release/app-release.aab META-INF/ANDROIDD.RSA > /tmp/bundle.rsa
-          openssl pkcs7 -inform DER -in /tmp/bundle.rsa -print_certs -out /tmp/bundle.pem
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          ls -l "$AAB"
+          # The signature file name comes from the key alias, uppercased and
+          # truncated to 8 chars: debug key alias "androiddebugkey" gives
+          # META-INF/ANDROIDD.RSA, but our upload key alias "mrshopworld"
+          # gives META-INF/MRSHOPWO.RSA. Never hardcode the name; find it.
+          SIG=$(unzip -l "$AAB" | grep -oE 'META-INF/[A-Z0-9_]+\.(RSA|DSA|EC)' | head -n 1)
+          echo "Signature file in AAB: $SIG"
+          test -n "$SIG" || (echo "ERROR: No signing certificate in AAB!" && exit 1)
+          unzip -p "$AAB" "$SIG" > /tmp/bundle.sig
+          openssl pkcs7 -inform DER -in /tmp/bundle.sig -print_certs -out /tmp/bundle.pem
           openssl x509 -in /tmp/bundle.pem -noout -subject -fingerprint -sha256
           openssl x509 -in /tmp/bundle.pem -noout -subject | grep -q "MR Shop World" || (echo "ERROR: AAB is NOT signed with the MR Shop World upload key!" && exit 1)
           echo "AAB is correctly signed with the MR Shop World upload key."
