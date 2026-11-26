@@ -58,11 +58,41 @@ jobs:
             echo "storeFile=upload-keystore.jks" >> key.properties
           fi
 
-          # Insert keystoreProperties right before android { block (after plugins block)
-          sed -i '/^android {/i def keystoreProperties = new Properties()\ndef keystorePropertiesFile = rootProject.file("key.properties")\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n}\n' app/build.gradle
-
-          sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/g' app/build.gradle
-          sed -i '/signingConfigs {/a \        release {\n            keyAlias keystoreProperties["keyAlias"]\n            keyPassword keystoreProperties["keyPassword"]\n            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n            storePassword keystoreProperties["storePassword"]\n        }' app/build.gradle
+          # Fix release signing in app/build.gradle with Python.
+          # The old sed patterns never matched the Flutter template
+          # (it uses "signingConfig = signingConfigs.debug" and has no
+          # "signingConfigs {" block), so the AAB was silently signed
+          # with the debug key. Fail loudly if it cannot be fixed.
+          python3 - <<'PY'
+          p = 'app/build.gradle'
+          s = open(p).read()
+          loader = ('def keystoreProperties = new Properties()\n'
+                    'def keystorePropertiesFile = rootProject.file("key.properties")\n'
+                    'if (keystorePropertiesFile.exists()) {\n'
+                    '    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n'
+                    '}\n\n')
+          if 'keystoreProperties' not in s:
+              assert 'android {' in s, 'android block not found'
+              s = s.replace('android {', loader + 'android {', 1)
+          signing = ('    signingConfigs {\n'
+                     '        release {\n'
+                     '            keyAlias keystoreProperties["keyAlias"]\n'
+                     '            keyPassword keystoreProperties["keyPassword"]\n'
+                     '            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n'
+                     '            storePassword keystoreProperties["storePassword"]\n'
+                     '        }\n'
+                     '    }\n\n')
+          if 'signingConfigs {' not in s:
+              assert 'buildTypes {' in s, 'buildTypes block not found'
+              s = s.replace('    buildTypes {', signing + '    buildTypes {', 1)
+          s = s.replace('signingConfig = signingConfigs.debug', 'signingConfig = signingConfigs.release')
+          s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+          assert 'signingConfigs.release' in s, 'release signingConfig not set'
+          assert 'signingConfigs.debug' not in s, 'debug signing still present'
+          open(p, 'w').write(s)
+          print('Release signing configured in app/build.gradle')
+          PY
+          grep -A 8 'signingConfigs' app/build.gradle
 
       - name: Generate Icons & Build Play Store AAB + APK
         run: |
@@ -71,6 +101,15 @@ jobs:
           dart run flutter_launcher_icons
           flutter build apk --release
           flutter build appbundle --release
+
+      - name: Verify AAB is release-signed
+        run: |
+          cd temp_app
+          unzip -p build/app/outputs/bundle/release/app-release.aab META-INF/ANDROIDD.RSA > /tmp/bundle.rsa
+          openssl pkcs7 -inform DER -in /tmp/bundle.rsa -print_certs -out /tmp/bundle.pem
+          openssl x509 -in /tmp/bundle.pem -noout -subject -fingerprint -sha256
+          openssl x509 -in /tmp/bundle.pem -noout -subject | grep -q "MR Shop World" || (echo "ERROR: AAB is NOT signed with the MR Shop World upload key!" && exit 1)
+          echo "AAB is correctly signed with the MR Shop World upload key."
 
       - name: Upload Play Store AAB, APK & Keystore Backup
         uses: actions/upload-artifact@v4
