@@ -132,16 +132,44 @@ jobs:
           PY
           grep -A 8 'signingConfigs' app/build.gradle
 
-      - name: Set minSdk 24 and bump patch version
+      - name: Set applicationId, minSdk 24 and bump patch version
         run: |
           cd temp_app
+          # PACKAGE NAME FIX (found 2026-11-27 while verifying run #22):
+          # `flutter create --org com.mrshopworld.app --project-name
+          # mr_shop_world` makes the applicationId
+          # com.mrshopworld.app.mr_shop_world, but the Play app is
+          # com.mrshopworld.app, so Play would refuse the AAB for a package
+          # mismatch (run #21's minSdk error hid this). Force namespace and
+          # applicationId to com.mrshopworld.app, and point the manifest's
+          # MainActivity at its real fully-qualified class name, since the
+          # Kotlin class stays in com.mrshopworld.app.mr_shop_world.
+          python3 - <<'PY'
+          import re
+          p = 'android/app/build.gradle'
+          s = open(p).read()
+          assert 'com.mrshopworld.app.mr_shop_world' in s, 'expected package string not in app/build.gradle'
+          s = s.replace('com.mrshopworld.app.mr_shop_world', 'com.mrshopworld.app')
+          assert 'com.mrshopworld.app.mr_shop_world' not in s, 'wrong package still present in app/build.gradle'
+          open(p, 'w').write(s)
+          for line in s.splitlines():
+              if 'namespace' in line or 'applicationId' in line:
+                  print('package line now:', line.strip())
+          m = 'android/app/src/main/AndroidManifest.xml'
+          t = open(m).read()
+          assert 'com.mrshopworld.app.mr_shop_world' in t, 'expected package string not in AndroidManifest.xml'
+          t = t.replace('package="com.mrshopworld.app.mr_shop_world"', 'package="com.mrshopworld.app"')
+          if 'android:name=".MainActivity"' in t:
+              t = t.replace('android:name=".MainActivity"', 'android:name="com.mrshopworld.app.mr_shop_world.MainActivity"')
+          assert 'com.mrshopworld.app.mr_shop_world.MainActivity' in t, 'MainActivity not fully qualified in manifest'
+          assert 'package="com.mrshopworld.app"' in t, 'manifest package not set to com.mrshopworld.app'
+          open(m, 'w').write(t)
+          print('Manifest package set to com.mrshopworld.app; MainActivity fully qualified')
           # Play Console rejects AABs with minSdk below 24 ("Play automatic
           # protection requires a minimum SDK version of 24 or higher").
           # The Flutter 3.24 template sets minSdk from flutter.minSdkVersion
           # (= 21), so force it to 24 in app/build.gradle, whatever form
           # the template uses. Fail loudly if no minSdk line is found.
-          python3 - <<'PY'
-          import re
           p = 'android/app/build.gradle'
           s = open(p).read()
           s2 = s
