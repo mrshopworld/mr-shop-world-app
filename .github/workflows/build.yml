@@ -132,6 +132,48 @@ jobs:
           PY
           grep -A 8 'signingConfigs' app/build.gradle
 
+      - name: Set minSdk 24 and bump patch version
+        run: |
+          cd temp_app
+          # Play Console rejects AABs with minSdk below 24 ("Play automatic
+          # protection requires a minimum SDK version of 24 or higher").
+          # The Flutter 3.24 template sets minSdk from flutter.minSdkVersion
+          # (= 21), so force it to 24 in app/build.gradle, whatever form
+          # the template uses. Fail loudly if no minSdk line is found.
+          python3 - <<'PY'
+          import re
+          p = 'android/app/build.gradle'
+          s = open(p).read()
+          s2 = s
+          s2 = re.sub(r'minSdkVersion\s*=\s*flutter\.minSdkVersion', 'minSdkVersion = 24', s2)
+          s2 = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', s2)
+          s2 = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', s2)
+          s2 = re.sub(r'minSdk\s+flutter\.minSdkVersion', 'minSdk 24', s2)
+          s2 = re.sub(r'minSdkVersion\s*=\s*21\b', 'minSdkVersion = 24', s2)
+          s2 = re.sub(r'minSdk\s*=\s*21\b', 'minSdk = 24', s2)
+          s2 = re.sub(r'minSdkVersion\s+21\b', 'minSdkVersion 24', s2)
+          s2 = re.sub(r'minSdk\s+21\b', 'minSdk 24', s2)
+          assert s2 != s, 'No minSdk line found to change in app/build.gradle'
+          assert 'flutter.minSdkVersion' not in s2, 'minSdk still comes from flutter.minSdkVersion'
+          open(p, 'w').write(s2)
+          for line in s2.splitlines():
+              if 'minSdk' in line:
+                  print('minSdk line now:', line.strip())
+          # Bump the patch version so Play does not reuse the version code of
+          # the rejected 1.0.0+1 bundle (run #21's AAB was refused at upload).
+          # Only bumps when the version is still 1.0.0+1; later repo bumps
+          # are left alone.
+          q = 'pubspec.yaml'
+          t = open(q).read()
+          if 'version: 1.0.0+1' in t:
+              t = t.replace('version: 1.0.0+1', 'version: 1.0.1+2')
+              open(q, 'w').write(t)
+              print('Version bumped to 1.0.1+2')
+          for line in t.splitlines():
+              if line.startswith('version:'):
+                  print('pubspec version now:', line.strip())
+          PY
+
       - name: Generate Icons & Build Play Store AAB + APK
         run: |
           cd temp_app
