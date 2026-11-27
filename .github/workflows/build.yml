@@ -212,6 +212,11 @@ jobs:
           # would resolve to the wrong class.
           if 'package="com.mrshopworld.app.mr_shop_world"' in t:
               t = t.replace('package="com.mrshopworld.app.mr_shop_world"', 'package="com.mrshopworld.app"')
+          # App label: the Setup step's sed handles it, but if the template
+          # label differs, set it here as a fallback (no assert — a missing
+          # label line must never fail the build).
+          if 'android:label="mr_shop_world"' in t:
+              t = t.replace('android:label="mr_shop_world"', 'android:label="MR Shop World"')
           if 'android:name=".MainActivity"' in t:
               t = t.replace('android:name=".MainActivity"', 'android:name="com.mrshopworld.app.mr_shop_world.MainActivity"')
           elif 'android:name="com.mrshopworld.app.mr_shop_world.MainActivity"' in t:
