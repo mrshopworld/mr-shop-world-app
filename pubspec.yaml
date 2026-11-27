@@ -1,7 +1,7 @@
 name: mr_shop_world
 description: MR Shop World Official App
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -9,8 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  webview_flutter: any
-  url_launcher: any
+  webview_flutter: ^4.13.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -22,7 +22,7 @@ flutter_launcher_icons:
   ios: true
   remove_alpha_ios: true
   image_path: "logo.jpg"
-  min_sdk_android: 21
+  min_sdk_android: 24
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "logo.jpg"
 
