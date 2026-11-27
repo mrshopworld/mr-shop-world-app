@@ -111,10 +111,17 @@ jobs:
               kts = False
           s = open(p).read()
           if kts:
-              loader = ('val keystoreProperties = java.util.Properties()\n'
+              # NOTE (run #28): fully-qualified java.util.Properties() and
+              # java.io.FileInputStream() do NOT compile in a .gradle.kts
+              # script — Gradle Kotlin DSL resolves `java` to the Java
+              # plugin extension, so `java.util` / `java.io` are unresolved.
+              # Use imports at the top of the file and plain class names.
+              if 'import java.util.Properties' not in s:
+                  s = 'import java.io.FileInputStream\nimport java.util.Properties\n\n' + s
+              loader = ('val keystoreProperties = Properties()\n'
                         'val keystorePropertiesFile = rootProject.file("key.properties")\n'
                         'if (keystorePropertiesFile.exists()) {\n'
-                        '    keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))\n'
+                        '    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n'
                         '}\n\n')
               signing = ('    signingConfigs {\n'
                          '        create("release") {\n'
