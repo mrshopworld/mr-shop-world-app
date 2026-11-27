@@ -132,7 +132,19 @@ jobs:
           PY
           grep -A 8 'signingConfigs' app/build.gradle
 
-      - name: Set applicationId, minSdk 24 and bump patch version
+      - name: Install Android SDK 36
+        run: |
+          # Run #24 was blocked by Play: "must target at least API level 36".
+          # Make sure the Android 16 (API 36) platform is installed on the
+          # runner before building. Tolerant: already-installed is fine.
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMGR" ]; then
+            yes | "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" || echo "sdkmanager: platform 36 already installed or install skipped"
+          else
+            echo "sdkmanager not found at $SDKMGR, continuing with preinstalled SDKs"
+          fi
+
+      - name: Set applicationId, SDK levels and bump patch version
         run: |
           cd temp_app
           # PACKAGE NAME FIX (found 2026-11-27 while verifying run #22):
@@ -189,22 +201,37 @@ jobs:
           s2 = re.sub(r'minSdk\s*=\s*21\b', 'minSdk = 24', s2)
           s2 = re.sub(r'minSdkVersion\s+21\b', 'minSdkVersion 24', s2)
           s2 = re.sub(r'minSdk\s+21\b', 'minSdk 24', s2)
+          # TARGET SDK 36 (run #24 was blocked by Play: "must target at
+          # least API level 36"). Flutter 3.24 defaults to targetSdk 34 and
+          # compileSdk 34, so force both to 36 in app/build.gradle,
+          # whatever form the template uses. compileSdk must be >= targetSdk.
+          s2 = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', s2)
+          s2 = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', s2)
+          s2 = re.sub(r'compileSdk\s*=\s*34\b', 'compileSdk = 36', s2)
+          s2 = re.sub(r'compileSdkVersion\s+34\b', 'compileSdkVersion 36', s2)
+          s2 = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', s2)
+          s2 = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 36', s2)
+          s2 = re.sub(r'targetSdk\s*=\s*34\b', 'targetSdk = 36', s2)
+          s2 = re.sub(r'targetSdkVersion\s+34\b', 'targetSdkVersion 36', s2)
           assert s2 != s, 'No minSdk line found to change in app/build.gradle'
           assert 'flutter.minSdkVersion' not in s2, 'minSdk still comes from flutter.minSdkVersion'
+          assert 'flutter.targetSdkVersion' not in s2, 'targetSdk still comes from flutter.targetSdkVersion'
+          assert 'flutter.compileSdkVersion' not in s2, 'compileSdk still comes from flutter.compileSdkVersion'
           open(p, 'w').write(s2)
           for line in s2.splitlines():
-              if 'minSdk' in line:
-                  print('minSdk line now:', line.strip())
+              if 'minSdk' in line or 'targetSdk' in line or 'compileSdk' in line:
+                  print('SDK line now:', line.strip())
           # Bump the patch version so Play does not reuse the version code of
-          # the rejected 1.0.0+1 bundle (run #21's AAB was refused at upload).
+          # an earlier refused/draft bundle (run #21 was refused at upload;
+          # run #24 reached a draft as versionCode 2 and will be discarded).
           # Only bumps when the version is still 1.0.0+1; later repo bumps
           # are left alone.
           q = 'pubspec.yaml'
           t = open(q).read()
           if 'version: 1.0.0+1' in t:
-              t = t.replace('version: 1.0.0+1', 'version: 1.0.1+2')
+              t = t.replace('version: 1.0.0+1', 'version: 1.0.2+3')
               open(q, 'w').write(t)
-              print('Version bumped to 1.0.1+2')
+              print('Version bumped to 1.0.2+3')
           for line in t.splitlines():
               if line.startswith('version:'):
                   print('pubspec version now:', line.strip())
