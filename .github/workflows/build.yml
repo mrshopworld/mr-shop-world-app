@@ -213,13 +213,26 @@ jobs:
           s2 = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 36', s2)
           s2 = re.sub(r'targetSdk\s*=\s*34\b', 'targetSdk = 36', s2)
           s2 = re.sub(r'targetSdkVersion\s+34\b', 'targetSdkVersion 36', s2)
+          # BUILD TOOLS 36 (run #25 failed in :app:processReleaseResources):
+          # Gradle used Build-Tools 30.0.3, whose aapt2 cannot read the
+          # Android 36 platform jar ("Failed to load resources table in
+          # android.jar"). Force build-tools 36.0.0 (installed by the
+          # sdkmanager step). Set it inside the android block so it wins
+          # over the Flutter plugin's default.
+          if re.search(r'buildToolsVersion\s*=?\s*["\'][^"\']+["\']', s2):
+              s2 = re.sub(r'buildToolsVersion\s*=?\s*["\'][^"\']+["\']', 'buildToolsVersion = "36.0.0"', s2)
+          elif re.search(r'compileSdk\s*=\s*36[^\n]*\n', s2):
+              s2 = re.sub(r'(compileSdk\s*=\s*36[^\n]*\n)', r'\1    buildToolsVersion = "36.0.0"\n', s2, count=1)
+          elif re.search(r'compileSdkVersion\s+36[^\n]*\n', s2):
+              s2 = re.sub(r'(compileSdkVersion\s+36[^\n]*\n)', r'\1    buildToolsVersion "36.0.0"\n', s2, count=1)
+          assert 'buildToolsVersion = "36.0.0"' in s2 or 'buildToolsVersion "36.0.0"' in s2, 'buildToolsVersion 36 not set'
           assert s2 != s, 'No minSdk line found to change in app/build.gradle'
           assert 'flutter.minSdkVersion' not in s2, 'minSdk still comes from flutter.minSdkVersion'
           assert 'flutter.targetSdkVersion' not in s2, 'targetSdk still comes from flutter.targetSdkVersion'
           assert 'flutter.compileSdkVersion' not in s2, 'compileSdk still comes from flutter.compileSdkVersion'
           open(p, 'w').write(s2)
           for line in s2.splitlines():
-              if 'minSdk' in line or 'targetSdk' in line or 'compileSdk' in line:
+              if 'minSdk' in line or 'targetSdk' in line or 'compileSdk' in line or 'buildToolsVersion' in line:
                   print('SDK line now:', line.strip())
           # Bump the patch version so Play does not reuse the version code of
           # an earlier refused/draft bundle (run #21 was refused at upload;
