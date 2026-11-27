@@ -32,7 +32,7 @@ jobs:
           # tested with its AGP). The old pin to 1.9.24 was for the Flutter
           # 3.24 template; forcing it on a newer template risks breaking
           # the build. Just check the plugin line exists.
-          grep -n "org.jetbrains.kotlin.android" android/settings.gradle || (echo "ERROR: Kotlin plugin line not found in settings.gradle" && exit 1)
+          grep -n "org.jetbrains.kotlin.android" android/settings.gradle.kts 2>/dev/null || grep -n "org.jetbrains.kotlin.android" android/settings.gradle 2>/dev/null || (echo "ERROR: Kotlin plugin line not found in settings.gradle(.kts)" && exit 1)
           flutter --version
 
           # App Name & Internet Permissions
@@ -93,42 +93,72 @@ jobs:
             echo "Fresh keystore generated and verified. Save this keystore as the KEYSTORE_BASE64 secret before the next build."
           fi
 
-          # Fix release signing in app/build.gradle with Python.
+          # Fix release signing in app/build.gradle(.kts) with Python.
           # The old sed patterns never matched the Flutter template
           # (it uses "signingConfig = signingConfigs.debug" and has no
           # "signingConfigs {" block), so the AAB was silently signed
           # with the debug key. Fail loudly if it cannot be fixed.
+          # Flutter 3.32+ templates use Kotlin DSL (app/build.gradle.kts);
+          # older templates use Groovy (app/build.gradle). The loader and
+          # signing block differ between the two, so detect the file first.
           python3 - <<'PY'
-          p = 'app/build.gradle'
+          import os
+          if os.path.exists('app/build.gradle.kts'):
+              p = 'app/build.gradle.kts'
+              kts = True
+          else:
+              p = 'app/build.gradle'
+              kts = False
           s = open(p).read()
-          loader = ('def keystoreProperties = new Properties()\n'
-                    'def keystorePropertiesFile = rootProject.file("key.properties")\n'
-                    'if (keystorePropertiesFile.exists()) {\n'
-                    '    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n'
-                    '}\n\n')
+          if kts:
+              loader = ('val keystoreProperties = java.util.Properties()\n'
+                        'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                        'if (keystorePropertiesFile.exists()) {\n'
+                        '    keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))\n'
+                        '}\n\n')
+              signing = ('    signingConfigs {\n'
+                         '        create("release") {\n'
+                         '            keyAlias = keystoreProperties["keyAlias"] as String\n'
+                         '            keyPassword = keystoreProperties["keyPassword"] as String\n'
+                         '            storeFile = file(keystoreProperties["storeFile"] as String)\n'
+                         '            storePassword = keystoreProperties["storePassword"] as String\n'
+                         '            storeType = "PKCS12"\n'
+                         '        }\n'
+                         '    }\n\n')
+              old_debug = 'signingConfig = signingConfigs.getByName("debug")'
+              new_release = 'signingConfig = signingConfigs.getByName("release")'
+          else:
+              loader = ('def keystoreProperties = new Properties()\n'
+                        'def keystorePropertiesFile = rootProject.file("key.properties")\n'
+                        'if (keystorePropertiesFile.exists()) {\n'
+                        '    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n'
+                        '}\n\n')
+              signing = ('    signingConfigs {\n'
+                         '        release {\n'
+                         '            keyAlias keystoreProperties["keyAlias"]\n'
+                         '            keyPassword keystoreProperties["keyPassword"]\n'
+                         '            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n'
+                         '            storePassword keystoreProperties["storePassword"]\n'
+                         '            storeType "PKCS12"\n'
+                         '        }\n'
+                         '    }\n\n')
+              old_debug = 'signingConfig = signingConfigs.debug'
+              new_release = 'signingConfig = signingConfigs.release'
           if 'keystoreProperties' not in s:
               assert 'android {' in s, 'android block not found'
               s = s.replace('android {', loader + 'android {', 1)
-          signing = ('    signingConfigs {\n'
-                     '        release {\n'
-                     '            keyAlias keystoreProperties["keyAlias"]\n'
-                     '            keyPassword keystoreProperties["keyPassword"]\n'
-                     '            storeFile keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null\n'
-                     '            storePassword keystoreProperties["storePassword"]\n'
-                     '            storeType "PKCS12"\n'
-                     '        }\n'
-                     '    }\n\n')
           if 'signingConfigs {' not in s:
               assert 'buildTypes {' in s, 'buildTypes block not found'
               s = s.replace('    buildTypes {', signing + '    buildTypes {', 1)
-          s = s.replace('signingConfig = signingConfigs.debug', 'signingConfig = signingConfigs.release')
+          assert old_debug in s, 'debug signingConfig line not found'
+          s = s.replace(old_debug, new_release)
           s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
-          assert 'signingConfigs.release' in s, 'release signingConfig not set'
-          assert 'signingConfigs.debug' not in s, 'debug signing still present'
+          assert new_release in s, 'release signingConfig not set'
+          assert 'signingConfigs.debug' not in s and 'getByName("debug")' not in s, 'debug signing still present'
           open(p, 'w').write(s)
-          print('Release signing configured in app/build.gradle')
+          print('Release signing configured in', p)
           PY
-          grep -A 8 'signingConfigs' app/build.gradle
+          grep -A 8 'signingConfigs' app/build.gradle.kts 2>/dev/null || grep -A 8 'signingConfigs' app/build.gradle
 
       - name: Install Android SDK 36
         run: |
@@ -155,10 +185,10 @@ jobs:
           # MainActivity at its real fully-qualified class name, since the
           # Kotlin class stays in com.mrshopworld.app.mr_shop_world.
           python3 - <<'PY'
-          import re
-          p = 'android/app/build.gradle'
+          import os, re
+          p = 'android/app/build.gradle.kts' if os.path.exists('android/app/build.gradle.kts') else 'android/app/build.gradle'
           s = open(p).read()
-          assert 'com.mrshopworld.app.mr_shop_world' in s, 'expected package string not in app/build.gradle'
+          assert 'com.mrshopworld.app.mr_shop_world' in s, 'expected package string not in app/build.gradle(.kts)'
           s = s.replace('com.mrshopworld.app.mr_shop_world', 'com.mrshopworld.app')
           assert 'com.mrshopworld.app.mr_shop_world' not in s, 'wrong package still present in app/build.gradle'
           open(p, 'w').write(s)
@@ -186,9 +216,9 @@ jobs:
           # Play Console rejects AABs with minSdk below 24 ("Play automatic
           # protection requires a minimum SDK version of 24 or higher").
           # The Flutter 3.24 template sets minSdk from flutter.minSdkVersion
-          # (= 21), so force it to 24 in app/build.gradle, whatever form
-          # the template uses. Fail loudly if no minSdk line is found.
-          p = 'android/app/build.gradle'
+          # (= 21), so force it to 24 in app/build.gradle(.kts), whatever
+          # form the template uses. Fail loudly if no minSdk line is found.
+          p = 'android/app/build.gradle.kts' if os.path.exists('android/app/build.gradle.kts') else 'android/app/build.gradle'
           s = open(p).read()
           s2 = s
           s2 = re.sub(r'minSdkVersion\s*=\s*flutter\.minSdkVersion', 'minSdkVersion = 24', s2)
